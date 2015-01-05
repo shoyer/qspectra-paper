@@ -1,0 +1,144 @@
+\documentclass{article}
+
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+\begin{document}
+
+\title{QSpectra: Efficient quantum simulation of non-linear spectroscopy of molecular aggregates}
+\author{Stephan Hoyer, Jan Roden, Siva Darbha, Donghyun Lee and K.\ Birgitta Whaley}
+\maketitle
+
+\begin{abstract}
+We introduce QSpectra, a library for fast and flexible quantum simulations of non-linear spectroscopy and dynamcis in molecular aggregates, such as photosynthetic light harvesting complexes.
+The focus is on solving approximate models of electronic or vibronic dynamics under known effective Hamiltonians as open quantum systems.
+It includes independent components for different Hamiltonians, dynamical models and spectroscopic methods, allowing for independent improvements in any of these subsystems.
+QSpectra is open source software built upon the open source scientific Python stack.
+\end{abstract}
+
+
+\section{Introduction}
+
+Understanding the relationship between molecular structure and function in photosynthetic light harvesting complexes requires complex and multi-disciplinary combination of experimental and theoretical tools. One of the most powerful tools for understanding these systems is ultrafast non-linear spectroscopy, which allows the flow of energy through these systems to be directly followed. Except for the simplest model systems, the rich features revealed by non-linear spectroscopy experiments remains cannot yet be reproduced by theoretical models. Doing so will require significant advances in computational modeling.
+
+In recent years, a large number of computational techniques have been developed for both simulating energy transfer and simulating spectroscopy in these systems. The downside of this proliferation of computational techniques is that researchers must reimplement these existing techniques in order to show the benefits of any new methods.
+
+In this paper, we describe a computational package, QSpectra, that we have developed for modeling energy transfer in these systems. Almost all of the individual methods contained in QSpectra are already documented in the research literature. QSpectra combines them a single efficient, cohesive and well tested computational system suitable for extension by future researchers.
+
+\section{Physics}
+
+Describe the class of effective Hamiltonians that QSpectra models.
+
+To enable efficient calculations, all simulations are performed under the
+rotating wave approximation. Furthermore, because the effective Hamiltonians
+conserve the number of electronic excitations, each model (when practical) only
+propagates within the necessary fixed subspaces of Liouville subspace.
+
+\section{Design}
+
+The design of QSpectra was governed by two objectives: we wanted it to be both modular (so it can be easily extended) and fast (so that it is worth using).
+
+\subsection{Modularity}
+
+QSpectra contains two types of non-trivial algorithms: methods for simulating dynamics and methods for simulating spectroscopy. In order to allow these algorithms to be written independently, QSpectra relies on an interface for writing efficient spectroscopy methods based on several standard components:
+\begin{enumerate}
+	\item The initial state of the system, $\vec\rho_0$ (typically the thermal state of the isolated system).
+	\item A differential equation for the time evolution of the system without any applied fields in the Schrödinger picture:
+		\begin{align}
+			\frac{d\vec\rho}{dt} = \mathcal{L}(\vec\rho).
+		\end{align}
+	Optionally, an equation of in the Heisenberg picture may also be supplied, which in some cases allows for significant further speedups.
+	\item The action of the electric dipole creation ($+$) and annihilation ($-$) super-operators for left- and right-multiplication on the state vector, $\mathcal{V}^\pm_{L/R} (\vec\rho)$, and expectation values of these operators.
+	\item The ability to restrict any of the above components to particular sets of states or pathways in Liouville space.
+\end{enumerate}
+These components are encapsulated in DynamicalModel objects that describe the chosen approximation scheme for the physics of the system of interest. To encourage modularity, these DynamicalModel objects are written in terms of Hamiltonian objects (e.g., ElectronicHamiltonian and VibronicHamiltonian) that describe the effective Hamiltonian of the physical system without reference to any further approximations.
+
+In QSpectra, we use this standard interface for both response function and equation of motion based methods for simulating spectroscopy methods. Reponse function based methods are typically written directly in terms of the above components [cite Mukamel] with the substitution of a Green's function for the free equation of motion. For simulating equation of motion based methods, this breakdown relies on the explicit assumption that the equation of motion for the system can be decomposed into a sum of system and field components [add justification]. In particular, we rely on our ability to combine these components into new equations of motion of the form
+\begin{align}
+	\frac{d\vec\rho}{dt} = \mathcal{L}(\vec\rho) + \sum_{n} E_n(t) \mathcal{V}^{s_n}_{o_n} (\vec\rho),
+\end{align}
+for a set of fields envelopes in the rotating wave approximation $E_n(t)$ with $s_n \in \{-, +\}$ and $o_n \in \{L, R\}$.
+
+\subsection{Numerical integration}
+
+The inner loop of all of our spectroscopy techniques calls the ZVODE solver for 1-dimensional differential equations. We use ZVODE because it provides significant speedups over integration methods with non-adaptive time steps such as Runga-Kutta, and because it allows for a higher level specification of error tolerances rather than an explicit time step.
+
+\subsection{Programming langauge}
+
+Another important design decision was our choice of programming language. For QSpectra we chose Python for several reasons. First of all, Python meets the minimal requirements: it is a modern and general programming with a mature ecosystem for scientific computing. Secondly, in contrast to propriety languages such as MATLAB and Mathematica, Python and its scientific libraries are free and open source. This allows anyone to run our code for free and without licensing restrictions, even when scaled to many simulataneous processes.
+
+Finally, we chose the convenience provided by Python's automatic memory management and terse syntax over the ability to compile into efficient machine code provided by compiled langauges such as C, C++ and FORTRAN. The later langauges are undoubtedly faster when run, but Python is also undoubtedly faster to write. For well established algorithms, it makes sense to write them in a compiled language to squeeze out the last bit of performance. However, the algorithms used by QSpectra are by no means obviously the most efficient; in the process of writing QSpectra, we routinely discovered numerous algorithmic improvements that allowed us to improve the speed of our code by order of magnitude. In contrast, using a compiled languages offers a fixed speedup (perhaps 2-10x) while imposing a constant penalty on the complexity of the necessary code. For highly vectorizable code such as the tensor arithmetic used at the core of the algorithms in QSpectra these speedups are further diminished, because we are able to make indirect use of highly optimized BLAS routines wrapped by the SciPy library or inner loops written in C in NumPy.
+
+An illustrative example of the performance tradeoff is found in Figure X, where we compare two implementations of ZOFE, one written in FORTRAN and the other in Python (as implemented in QSpectra). The FORTRAN routine is only Y times faster but includes Z times more lines of code.
+
+In some cases, we expect that we may need to write some routines in a compiled language. When and if this becomes necessary, a strength of Python is its flexibility for use as a ``glue'' language: critical inner loops can be written in FORTRAN or C and easily called from Python. The main constraint imposed by our use of Python is that QSpectra will never be efficient for simulating extremely small or simplified systems, for which the overhead of a Python function call is comparable to the cost of calculating the time derivative of the state vector.
+
+Implementing our core integration routine in a high level language such as Python does mean that we are unable to utilize graphical processing units, which have been shown to significantly accelerate parallel computations for non-linear spectroscopy.
+
+\subsection{Software engineering practices}
+
+Important software engineer principles that we utilize in QSpectra:
+
+\begin{enumerate}
+	\item Separation of concerns: The spectroscopy simulation methods are entirely unaware of the details of the dynamical model. This allows these components to be interchanged and reasoned about separately.
+	\item Immutability: None of the built-in methods in QSpectra modify the state of existing objects; rather, they return new objects. Immutability significantly simplifies reasoning about complex code.
+	\item Idempotency: QSpectra includes for creating modified Hamiltonians by either adding disorder or transforming to a rotating reference frame. These methods are idempotent: calling them repeatedly returns the same result.
+	\item Commutability: These methods that return new Hamiltonians will produce the same result when applied in either order.
+	\item Reproducibility: All Hamiltonians require a fixed random seed to ensure that stochastic results are reprocuble.
+	\item Source control: Revisions to QSpectra are tracked with the Git distributed version control system and hosted on GitHub.
+	\item Automated testing: In simple cases, unit tests are used to verify that all functionality behaves as desired. In more complex cases, such as to verify simulation results, regression tests are used to verify that the outputs do not change.
+	New patches are automatically tested \footnote{We need to actually do this.} to verify that they pass a test-suite before they can be merged.
+\end{enumerate}
+
+The GitHub platform has been explicitly designed for open source collaboration, and we hope that hosting QSpectra on this platform will facilitate contributions of new methods from third party researchers.
+
+\section{Features}
+
+QSpectra currently implements the following features. Those marked by \textcolor{red}{(TODO)} have not yet been implemented, but would be great assets to include if possible. This list should probably end up in a table of some form eventually.
+
+\begin{enumerate}
+	\item Hamiltonians:
+	\begin{enumerate}
+		\item Electronic systems (under effective Hamiltonians within the Heitler-London approximation)
+      	\item Vibronic systems (electronic systems with explicit vibrational modes)
+	\end{enumerate}
+	\item Dynamical models:
+	\begin{enumerate}
+		\item Unitary
+		\item Redfield theory
+		\begin{enumerate}
+			\item Under the secular approximation or not
+			\item Simulated in the site or exciton basis
+			\item Using a sparse or non-sparse equation of motion
+		\end{enumerate}
+		\item Zeroth order functional expansion (ZOFE)
+		\item \textcolor{red}{(TODO)} Hierarchical equations of motion (HEOM)
+	    \item \textcolor{red}{(TODO)} Time non-local master equation (special case of HEOM)
+	\end{enumerate}
+	\item Spectroscopy and simulation methods:
+	\begin{enumerate}
+		\item Free evolution (no field)
+		\item Equations of motion including fields, such as:
+		\begin{enumerate}
+			\item The density matrix following pump pulses.
+			\item \textcolor{red}{(TODO)} Equation-of-motion phase-matched-approach (EOM-PMA)
+		\end{enumerate}
+		\item Linear response based methods, such as:
+		\begin{enumerate}
+			\item Absorption and emission spectra
+			\item Impulsive probe pulses
+		\end{enumerate}
+		\item Third-order response functions (in particular, for 2D spectroscopy)
+		\item Efficient averaging over molecular orientations
+	\end{enumerate}
+\end{enumerate}
+
+\section{Examples}
+
+API walkthrough
+
+FMO dynamics with Redfield and ZOFE
+
+2D spectroscopy for the Jonas vibronic dimer
+
+\end{document}
